@@ -6,6 +6,7 @@ class ProductDemo {
     this.totalPages = Math.ceil(this.totalProducts / this.productsPerPage);
     this.categories = ['Tapping Tool', 'Drills', 'End Mills', 'Reamers', 'Countersinks', 'Boring Tools'];
     this.productsPerCategory = 50;
+    this.isLoadingPage = false
 
     this.paginationState = {
       page: 1,
@@ -76,20 +77,22 @@ class ProductDemo {
   }
 
   async loadPaginationData(page) {
-    if (this.paginationState.pageData[page]) {
-      this.renderPaginationList(this.paginationState.pageData[page]);
-      this.updatePaginationUI();
-      return;
-    }
+    // 邊界防呆
+    const total = this.paginationState.totalPages || this.totalPages;
+    if (page < 1) page = 1;
+    if (page > total) page = total;
 
     this.showPaginationLoader();
 
     try {
+      // 每次都模擬 API 取得資料（不使用快取）
       await this.delay(800);
       const mockResponse = this.generateMockAPIResponse(page, this.productsPerPage);
-      this.paginationState.pageData[page] = mockResponse;
+
+      // 每次都更新目前頁碼
       this.paginationState.page = page;
 
+      // 渲染清單與 UI
       this.renderPaginationList(mockResponse);
       this.updatePaginationUI();
     } catch (error) {
@@ -98,6 +101,7 @@ class ProductDemo {
       this.hidePaginationLoader();
     }
   }
+
 
   async loadInfiniteData() {
     if (this.infiniteState.isLoading || this.infiniteState.page > this.infiniteState.totalPages) return;
