@@ -5,21 +5,28 @@ class ProductDemo {
     this.productsPerPage = 20;
     this.totalPages = Math.ceil(this.totalProducts / this.productsPerPage);
     this.categories = ['Tapping Tool', 'Drills', 'End Mills', 'Reamers', 'Countersinks', 'Boring Tools'];
-    this.productsPerCategory = 50;
-    this.isLoadingPage = false
+    // this.productsPerCategory = 50; // 不再使用固定配額
 
+    // 類別數量改為：隨機分配（總和=300），並計算每類起始索引
+    this.categoryAllocation = this.buildRandomAllocation(this.totalProducts, this.categories.length);
+    this.categoryStarts = this.computeCategoryStarts(this.categoryAllocation);
+
+    this.isLoadingPage = false;
+
+    // 分頁狀態（不使用任何快取或 storage）
     this.paginationState = {
       page: 1,
       totalPages: this.totalPages,
-      pageData: {},
-      scrollPosition: 0,
+      pageData: {},           // 仍保留欄位但不使用
+      scrollPosition: 0,      // 不再保存/還原
       categoryTracker: new Map()
     };
 
+    // 無限滾動狀態（不使用任何快取或 storage）
     this.infiniteState = {
-      page: 1,
+      page: 1,                 // 代表下一次要載入的「第幾批/頁」
       totalPages: this.totalPages,
-      categories: new Map(),
+      categories: new Map(),   // 只做當次渲染的臨時聚合
       isLoading: false,
       allProducts: [],
       scrollPosition: 0
@@ -30,8 +37,10 @@ class ProductDemo {
 
   init() {
     this.bindEvents();
+
+    // 預設進入 Pagination：直接載入第 1 頁
     this.loadPaginationData(1);
-    this.restoreState();
+    // ❌ 不再 restoreState()
   }
 
   bindEvents() {
@@ -49,8 +58,9 @@ class ProductDemo {
     this.setupInfiniteScroll();
   }
 
+  // === 模式切換：不保存狀態，直接重置並重新載入 ===
   switchMode(mode) {
-    this.saveState();
+    // ❌ 不再 saveState()
     this.currentMode = mode;
 
     const paginationTab = document.getElementById('paginationTab');
@@ -59,25 +69,48 @@ class ProductDemo {
     const infiniteDemo = document.getElementById('infiniteDemo');
 
     if (mode === 'pagination') {
+      // 更新 Tab 樣式
       paginationTab.className = 'px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg';
       infiniteTab.className = 'px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg';
+
+      // 顯示/隱藏區塊
       paginationDemo.classList.remove('hidden');
       infiniteDemo.classList.add('hidden');
+
+      // 重置 Pagination 狀態 → 第 1 頁並重新載入
+      this.paginationState.page = 1;
+      const list = document.getElementById('paginationList');
+      if (list) list.innerHTML = '';
+      this.loadPaginationData(1);
+      window.scrollTo({ top: 0, behavior: 'instant' });
     } else {
+      // 更新 Tab 樣式
       infiniteTab.className = 'px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg';
       paginationTab.className = 'px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 rounded-lg';
+
+      // 顯示/隱藏區塊
       infiniteDemo.classList.remove('hidden');
       paginationDemo.classList.add('hidden');
-      if (this.infiniteState.allProducts.length === 0) {
-        this.loadInfiniteData();
-      }
+
+      // 重置 Infinite 狀態 → 清空並回到第一批
+      this.infiniteState.page = 1;
+      this.infiniteState.categories = new Map();
+      this.infiniteState.allProducts = [];
+      const list = document.getElementById('infiniteList');
+      if (list) list.innerHTML = '';
+      document.getElementById('loadedCount').textContent = `0 of ${this.totalProducts} products loaded`;
+      document.getElementById('endMessage').classList.add('hidden');
+
+      // 重新載入第一批
+      this.loadInfiniteData();
+      window.scrollTo({ top: 0, behavior: 'instant' });
     }
 
-    this.restoreState();
+    // ❌ 不再 restoreState()
   }
 
   async loadPaginationData(page) {
-    // 邊界防呆
+    // 邊界
     const total = this.paginationState.totalPages || this.totalPages;
     if (page < 1) page = 1;
     if (page > total) page = total;
@@ -85,7 +118,7 @@ class ProductDemo {
     this.showPaginationLoader();
 
     try {
-      // 每次都模擬 API 取得資料（不使用快取）
+      // 不使用快取：每次都模擬 API 延遲再取資料
       await this.delay(800);
       const mockResponse = this.generateMockAPIResponse(page, this.productsPerPage);
 
@@ -102,8 +135,8 @@ class ProductDemo {
     }
   }
 
-
   async loadInfiniteData() {
+    // 到頂就不再載
     if (this.infiniteState.isLoading || this.infiniteState.page > this.infiniteState.totalPages) return;
 
     this.infiniteState.isLoading = true;
@@ -113,6 +146,7 @@ class ProductDemo {
       await this.delay(1000);
       const mockResponse = this.generateMockAPIResponse(this.infiniteState.page, this.productsPerPage);
 
+      // 聚合本批資料到類別
       mockResponse.rows.forEach(product => {
         if (this.infiniteState.categories.has(product.category)) {
           const existing = this.infiniteState.categories.get(product.category);
@@ -125,9 +159,11 @@ class ProductDemo {
         }
       });
 
+      // 附加到全部已載產品
       this.infiniteState.allProducts = [...this.infiniteState.allProducts, ...mockResponse.rows];
       this.infiniteState.page++;
 
+      // 渲染 & UI
       this.renderInfiniteList();
       this.updateInfiniteUI();
     } catch (error) {
@@ -136,6 +172,38 @@ class ProductDemo {
       this.infiniteState.isLoading = false;
       this.hideInfiniteLoader();
     }
+  }
+
+  // === 類別分配工具 ===
+  buildRandomAllocation(total, k) {
+    const counts = Array(k).fill(0);
+    for (let i = 0; i < total; i++) {
+      const bucket = Math.floor(Math.random() * k);
+      counts[bucket]++;
+    }
+    // 若你想「每類至少 1 筆」可改成遞迴重抽（此版保留可能為 0 的情況）
+    return counts;
+  }
+
+  computeCategoryStarts(allocation) {
+    const starts = [];
+    let acc = 0;
+    for (let i = 0; i < allocation.length; i++) {
+      starts.push(acc);
+      acc += allocation[i];
+    }
+    return starts;
+  }
+
+  categoryForGlobalIndex(i) {
+    for (let catIdx = 0; catIdx < this.categories.length; catIdx++) {
+      const start = this.categoryStarts[catIdx];
+      const end = start + this.categoryAllocation[catIdx]; // not inclusive
+      if (i >= start && i < end) {
+        return { catIndex: catIdx, inCategoryIndex: i - start };
+      }
+    }
+    return { catIndex: this.categories.length - 1, inCategoryIndex: 0 };
   }
 
   generateMockAPIResponse(page, perPage) {
@@ -147,9 +215,10 @@ class ProductDemo {
     const rows = [];
 
     for (let i = startProduct; i < endProduct; i++) {
-      const categoryIndex = Math.floor(i / this.productsPerCategory);
-      const categoryName = this.categories[categoryIndex];
-      const productInCategory = (i % this.productsPerCategory) + 1;
+      const { catIndex, inCategoryIndex } = this.categoryForGlobalIndex(i);
+      const categoryName = this.categories[catIndex];
+      const productInCategory = inCategoryIndex + 1;
+
       const material = materials[i % materials.length];
       const brand = brands[i % brands.length];
 
@@ -168,10 +237,11 @@ class ProductDemo {
       lastPage: this.totalPages,
       perPage: perPage,
       total: this.totalProducts,
-      rows: rows
+      rows
     };
   }
 
+  // === 渲染（Pagination） ===
   renderPaginationList(apiResponse) {
     const list = document.getElementById('paginationList');
     const currentPage = this.paginationState.page;
@@ -192,14 +262,19 @@ class ProductDemo {
     }).join('');
   }
 
+  // ✅ 改為依「隨機分配」計算標題是否顯示
   shouldShowCategoryTitle(categoryName, page) {
-    const categoryIndex = this.categories.indexOf(categoryName);
-    const categoryStartProduct = categoryIndex * this.productsPerCategory;
-    const pageStartProduct = (page - 1) * this.productsPerPage;
+    const catIndex = this.categories.indexOf(categoryName);
+    if (catIndex === -1) return false;
 
-    return categoryStartProduct >= pageStartProduct && categoryStartProduct < pageStartProduct + this.productsPerPage;
+    const categoryStartProduct = this.categoryStarts[catIndex]; // 0-based
+    const pageStartProduct = (page - 1) * this.productsPerPage; // 0-based
+    const pageEndProduct = pageStartProduct + this.productsPerPage; // not inclusive
+
+    return categoryStartProduct >= pageStartProduct && categoryStartProduct < pageEndProduct;
   }
 
+  // === 渲染（Infinite） ===
   renderInfiniteList() {
     const list = document.getElementById('infiniteList');
     const categoriesArray = Array.from(this.infiniteState.categories.values());
@@ -208,37 +283,39 @@ class ProductDemo {
 
   createCategorySection(category, showTitle = true) {
     return `
-            <div class="category-section">
-                ${showTitle ? `<h2 class="text-xl font-semibold text-gray-900 mb-6 border-b border-gray-200 pb-3">
-                    ${category.name}
-                </h2>` : ''}
-                <div class="space-y-4">
-                    ${category.products.map(product => this.createProductItem(product)).join('')}
-                </div>
-            </div>
-        `;
+      <div class="category-section">
+        ${showTitle ? `<h2 class="text-xl font-semibold text-gray-900 mb-6 border-b border-gray-200 pb-3">
+          ${category.name}
+        </h2>` : ''}
+        <div class="space-y-4">
+          ${category.products.map(product => this.createProductItem(product)).join('')}
+        </div>
+      </div>
+    `;
   }
 
   createProductItem(product) {
+    // 不改你的卡片 Layout/樣式（仍保留 cursor-pointer / chevron）
     return `
-            <div class="bg-white rounded-lg border border-gray-200 p-6 hover:shadow-lg transition-shadow cursor-pointer product-item" data-product='${JSON.stringify(product)}'>
-                <div class="flex items-start space-x-6">
-                    <div class="flex-shrink-0">
-                        <img class="w-40 h-20 object-cover rounded-lg" src="./assets/photos/taping_tool.png" alt="${product.mainImageUrl}" />
-                    </div>
-                    <div class="flex-1 min-w-0">
-                        <h3 class="text-lg font-medium text-gray-900 mb-2">${product.name}</h3>
-                        <p class="text-sm text-gray-600 mb-2 font-medium">${product.brand}</p>
-                        <p class="text-sm text-gray-500 leading-relaxed">${product.description}</p>
-                    </div>
-                    <div class="flex-shrink-0">
-                        <i class="fa-solid fa-chevron-right text-gray-400 text-lg"></i>
-                    </div>
-                </div>
-            </div>
-        `;
+      <div class="bg-white rounded-lg border border-gray-200 p-6 hover:shadow-lg transition-shadow cursor-pointer product-item" data-product='${JSON.stringify(product)}'>
+        <div class="flex items-start space-x-6">
+          <div class="flex-shrink-0">
+            <img class="w-40 h-20 object-cover rounded-lg" src="./assets/photos/taping_tool.png" alt="${product.mainImageUrl}" />
+          </div>
+          <div class="flex-1 min-w-0">
+            <h3 class="text-lg font-medium text-gray-900 mb-2">${product.name}</h3>
+            <p class="text-sm text-gray-600 mb-2 font-medium">${product.brand}</p>
+            <p class="text-sm text-gray-500 leading-relaxed">${product.description}</p>
+          </div>
+          <div class="flex-shrink-0">
+            <i class="fa-solid fa-chevron-right text-gray-400 text-lg"></i>
+          </div>
+        </div>
+      </div>
+    `;
   }
 
+  // === Infinite Scroll 觸發 ===
   setupInfiniteScroll() {
     const observer = new IntersectionObserver((entries) => {
       entries.forEach(entry => {
@@ -255,6 +332,7 @@ class ProductDemo {
     observer.observe(sentinel);
   }
 
+  // === Loading 顯示/隱藏 ===
   showPaginationLoader() {
     document.getElementById('paginationLoader').classList.remove('hidden');
     document.getElementById('paginationList').classList.add('hidden');
@@ -276,6 +354,7 @@ class ProductDemo {
     }
   }
 
+  // === 分頁 UI ===
   updatePaginationUI() {
     const currentPage = this.paginationState.page;
     const totalPages = this.paginationState.totalPages;
@@ -332,83 +411,31 @@ class ProductDemo {
   }
 
   updateInfiniteUI() {
-    document.getElementById('loadedCount').textContent = `${this.infiniteState.allProducts.length} of 300 products loaded`;
+    document.getElementById('loadedCount').textContent =
+      `${this.infiniteState.allProducts.length} of ${this.totalProducts} products loaded`;
   }
 
   previousPage() {
     if (this.paginationState.page > 1) {
-      this.saveScrollPosition();
+      // ❌ 不再保存 scrollPosition
       this.loadPaginationData(this.paginationState.page - 1);
+      window.scrollTo({ top: 0, behavior: 'instant' });
     }
   }
 
   nextPage() {
     if (this.paginationState.page < this.paginationState.totalPages) {
-      this.saveScrollPosition();
+      // ❌ 不再保存 scrollPosition
       this.loadPaginationData(this.paginationState.page + 1);
+      window.scrollTo({ top: 0, behavior: 'instant' });
     }
   }
 
-  saveScrollPosition() {
-    if (this.currentMode === 'pagination') {
-      this.paginationState.scrollPosition = window.scrollY;
-    } else {
-      this.infiniteState.scrollPosition = window.scrollY;
-    }
-  }
-
-  restoreScrollPosition() {
-    setTimeout(() => {
-      const position = this.currentMode === 'pagination'
-        ? this.paginationState.scrollPosition
-        : this.infiniteState.scrollPosition;
-      window.scrollTo(0, position);
-    }, 100);
-  }
-
-  saveState() {
-    this.saveScrollPosition();
-
-    if (this.currentMode === 'pagination') {
-      sessionStorage.setItem('paginationState', JSON.stringify(this.paginationState));
-    } else {
-      const stateToSave = {
-        page: this.infiniteState.page,
-        totalPages: this.infiniteState.totalPages,
-        allProducts: this.infiniteState.allProducts,
-        categories: Array.from(this.infiniteState.categories.entries()),
-        scrollPosition: this.infiniteState.scrollPosition
-      };
-      sessionStorage.setItem('infiniteState', JSON.stringify(stateToSave));
-    }
-  }
-
-  restoreState() {
-    if (this.currentMode === 'pagination') {
-      const saved = sessionStorage.getItem('paginationState');
-      if (saved) {
-        this.paginationState = { ...this.paginationState, ...JSON.parse(saved) };
-        this.restoreScrollPosition();
-      }
-    } else {
-      const saved = sessionStorage.getItem('infiniteState');
-      if (saved) {
-        const state = JSON.parse(saved);
-        this.infiniteState.page = state.page;
-        this.infiniteState.totalPages = state.totalPages;
-        this.infiniteState.allProducts = state.allProducts || [];
-        this.infiniteState.categories = new Map(state.categories || []);
-        this.infiniteState.scrollPosition = state.scrollPosition || 0;
-
-        if (this.infiniteState.allProducts.length > 0) {
-          this.renderInfiniteList();
-          this.updateInfiniteUI();
-        }
-
-        this.restoreScrollPosition();
-      }
-    }
-  }
+  // ❌ 不再使用保存/還原狀態與捲動位置
+  // saveScrollPosition() {}
+  // restoreScrollPosition() {}
+  // saveState() {}
+  // restoreState() {}
 
   delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -417,4 +444,7 @@ class ProductDemo {
 
 document.addEventListener('DOMContentLoaded', () => {
   const demo = new ProductDemo();
+
+  // ❌ 不再委派卡片點擊事件開啟 Modal（Modal 已不使用）
+  // document.addEventListener('click', (e) => { ... });
 });
