@@ -43,8 +43,8 @@ class ProductDemo {
     document.getElementById('prevBtnDesktop').addEventListener('click', () => this.previousPage());
     document.getElementById('nextBtnDesktop').addEventListener('click', () => this.nextPage());
 
-    document.getElementById('closeModal').addEventListener('click', () => this.closeModal());
-    document.getElementById('backToList').addEventListener('click', () => this.closeModal());
+    // document.getElementById('closeModal').addEventListener('click', () => this.closeModal());
+    // document.getElementById('backToList').addEventListener('click', () => this.closeModal());
 
     this.setupInfiniteScroll();
   }
@@ -366,20 +366,6 @@ class ProductDemo {
     }, 100);
   }
 
-  openProductModal(product) {
-    this.saveState();
-    const modal = document.getElementById('modalContent');
-    modal.querySelector('h4').textContent = product.name;
-    modal.querySelector('p:nth-of-type(1)').textContent = product.brand;
-    modal.querySelector('p:nth-of-type(2)').textContent = product.description;
-    document.getElementById('productModal').classList.remove('hidden');
-  }
-
-  closeModal() {
-    document.getElementById('productModal').classList.add('hidden');
-    this.restoreState();
-  }
-
   saveState() {
     this.saveScrollPosition();
 
@@ -431,12 +417,4 @@ class ProductDemo {
 
 document.addEventListener('DOMContentLoaded', () => {
   const demo = new ProductDemo();
-
-  document.addEventListener('click', (e) => {
-    const item = e.target.closest('.product-item');
-    if (item) {
-      const product = JSON.parse(item.dataset.product);
-      demo.openProductModal(product);
-    }
-  });
 });
